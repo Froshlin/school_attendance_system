@@ -102,13 +102,13 @@ def scan():
     conn.commit()
     conn.close()
 
-    send_notification(student[2], student[1], 'present')
+    # Removed send_notification call to prevent automatic email on scan
     return jsonify({'message': f'Attendance logged for {student[1]}'})
 
 @app.route('/attendance', methods=['GET'])
 def get_attendance():
     conn, cursor = get_db()
-    cursor.execute("SELECT s.full_name, a.date, a.time, a.status FROM attendance a JOIN students s ON a.student_id = s.id")
+    cursor.execute("SELECT a.id as attendance_id, s.full_name, a.date, a.time, a.status FROM attendance a JOIN students s ON a.student_id = s.id")
     records = cursor.fetchall()
     conn.close()
     # Convert Row objects to list of dictionaries
@@ -139,33 +139,74 @@ def add_student():
         conn.close()
         return jsonify({'error': str(e)}), 400
 
-@app.route('/mark_all_attendance', methods=['POST'])
-def mark_all_attendance():
+@app.route('/edit_student', methods=['POST'])
+def edit_student():
+    id = request.form.get('id')
+    matric_number = request.form.get('matric_number')
+    full_name = request.form.get('full_name')
+    parent_email = request.form.get('parent_email')
+    if not all([id, matric_number, full_name, parent_email]):
+        return jsonify({'error': 'All fields are required'}), 400
+    template = hash_template(matric_number)
     conn, cursor = get_db()
-    cursor.execute("SELECT id, full_name, parent_email FROM students")
-    students = cursor.fetchall()
-    current_date = datetime.now().date().isoformat()
-    current_time = datetime.now().time().isoformat()
-    for student in students:
+    try:
         cursor.execute(
-            "INSERT INTO attendance (student_id, date, time, status) VALUES (?, ?, ?, ?)",
-            (student[0], current_date, current_time, 'absent')
+            "UPDATE students SET matric_number = ?, full_name = ?, fingerprint_template = ?, parent_email = ? WHERE id = ?",
+            (matric_number, full_name, template, parent_email, id)
         )
+        conn.commit()
+        conn.close()
+        return jsonify({'message': 'Student updated successfully'})
+    except sqlite3.IntegrityError:
+        conn.close()
+        return jsonify({'error': 'Matric number already exists'}), 400
+    except Exception as e:
+        conn.close()
+        return jsonify({'error': str(e)}), 400
+
+@app.route('/delete_student', methods=['POST'])
+def delete_student():
+    id = request.form.get('id')
+    if not id:
+        return jsonify({'error': 'No id provided'}), 400
+    conn, cursor = get_db()
+    cursor.execute("DELETE FROM students WHERE id = ?", (id,))
     conn.commit()
     conn.close()
-    return jsonify({'message': 'Attendance marked for all students'})
+    return jsonify({'message': 'Student deleted successfully'})
+
+@app.route('/delete_attendance', methods=['POST'])
+def delete_attendance():
+    id = request.form.get('id')
+    if not id:
+        return jsonify({'error': 'No id provided'}), 400
+    conn, cursor = get_db()
+    cursor.execute("DELETE FROM attendance WHERE id = ?", (id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'message': 'Attendance record deleted successfully'})
 
 @app.route('/send_absence_alerts', methods=['POST'])
 def send_absence_alerts():
     conn, cursor = get_db()
+    current_date = datetime.now().date().isoformat()
     cursor.execute("""
         SELECT s.id, s.full_name, s.parent_email 
         FROM students s 
-        LEFT JOIN attendance a ON s.id = a.student_id AND a.date = ? 
-        WHERE a.id IS NULL OR a.status = 'absent'
-    """, (datetime.now().date().isoformat(),))
+        WHERE NOT EXISTS (
+            SELECT 1 FROM attendance a 
+            WHERE a.student_id = s.id 
+            AND a.date = ? 
+            AND a.status = 'present'
+        )
+    """, (current_date,))
     absent_students = cursor.fetchall()
     conn.close()
+
+    # Debug: Log the students being selected for alerts
+    print(f"Students selected for absence alerts on {current_date}:")
+    for student in absent_students:
+        print(f"ID: {student[0]}, Name: {student[1]}, Email: {student[2]}")
 
     sent_statuses = []
     for student in absent_students:

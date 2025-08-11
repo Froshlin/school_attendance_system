@@ -2,8 +2,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const addStudentForm = document.getElementById('addStudentForm');
     const attendanceTable = document.getElementById('attendanceTable');
     const scanForm = document.getElementById('scanForm');
-    const markAllBtn = document.getElementById('markAllBtn');
     const sendAlertsBtn = document.getElementById('sendAlertsBtn');
+    const editModal = document.getElementById('editModal');
+    const editForm = document.getElementById('editStudentForm');
+    const editId = document.getElementById('edit_id');
+    const editMatric = document.getElementById('edit_matric_number');
+    const editFullName = document.getElementById('edit_full_name');
+    const editParentEmail = document.getElementById('edit_parent_email');
 
     // Load attendance for index table
     function loadAttendance() {
@@ -21,13 +26,16 @@ document.addEventListener('DOMContentLoaded', () => {
                                 <td>${row.date || 'N/A'}</td>
                                 <td>${row.time || 'N/A'}</td>
                                 <td>${row.status || 'N/A'}</td>
+                                <td><button class="btn btn-danger btn-sm delete-attendance" data-id="${row.attendance_id}">Delete</button></td>
                             `;
                             tbody.appendChild(tr);
                         });
                         alert('Attendance marked successfully for listed students!');
                     } else {
-                        tbody.innerHTML = '<tr><td colspan="4">No attendance records found.</td></tr>';
+                        tbody.innerHTML = '<tr><td colspan="5">No attendance records found.</td></tr>';
                     }
+                    // Re-attach delete event listeners after loading
+                    attachDeleteAttendanceListeners();
                 })
                 .catch(error => console.error('Error loading attendance:', error));
         }
@@ -43,9 +51,72 @@ document.addEventListener('DOMContentLoaded', () => {
                     const doc = parser.parseFromString(html, 'text/html');
                     const tbody = doc.querySelector('table tbody');
                     document.querySelector('table tbody').innerHTML = tbody.innerHTML;
+                    // Re-attach edit and delete event listeners after loading
+                    attachEditDeleteListeners();
                 })
                 .catch(error => console.error('Error loading students:', error));
         }
+    }
+
+    // Attach edit and delete listeners
+    function attachEditDeleteListeners() {
+        document.querySelectorAll('.edit-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = e.target.dataset.id;
+                const matric = e.target.dataset.matric;
+                const fullname = e.target.dataset.fullname;
+                const email = e.target.dataset.email;
+
+                editId.value = id;
+                editMatric.value = matric;
+                editFullName.value = fullname;
+                editParentEmail.value = email;
+
+                const modal = new bootstrap.Modal(editModal); // Use editModal directly
+                modal.show();
+            });
+        });
+
+        document.querySelectorAll('.delete-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = e.target.dataset.id;
+                if (confirm('Are you sure you want to delete this student?')) {
+                    fetch('/delete_student', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `id=${encodeURIComponent(id)}`
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        alert(data.message || data.error);
+                        if (data.message) loadStudents();
+                    })
+                    .catch(error => console.error('Error deleting student:', error));
+                }
+            });
+        });
+    }
+
+    // Attach delete listeners for attendance
+    function attachDeleteAttendanceListeners() {
+        document.querySelectorAll('.delete-attendance').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const id = e.target.dataset.id;
+                if (confirm('Are you sure you want to delete this attendance record?')) {
+                    fetch('/delete_attendance', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                        body: `id=${encodeURIComponent(id)}`
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        alert(data.message || data.error);
+                        if (data.message) loadAttendance();
+                    })
+                    .catch(error => console.error('Error deleting attendance:', error));
+                }
+            });
+        });
     }
 
     // Scan attendance
@@ -102,30 +173,47 @@ document.addEventListener('DOMContentLoaded', () => {
         });
     }
 
-    // Mark all attendance
-    if (markAllBtn) {
-        markAllBtn.addEventListener('click', () => {
-            fetch('/mark_all_attendance', { method: 'POST' })
-                .then(response => response.json())
-                .then(data => {
-                    alert(data.message);
-                    sendAlertsBtn.disabled = false; // Enable send alerts button
-                    loadAttendance(); // Refresh attendance table
-                })
-                .catch(error => console.error('Error:', error));
+    // Edit student
+    if (editForm) {
+        editForm.addEventListener('submit', (e) => {
+            e.preventDefault();
+            const id = editId.value;
+            const matric_number = editMatric.value.trim();
+            const full_name = editFullName.value.trim();
+            const parent_email = editParentEmail.value.trim();
+
+            console.log('Updating:', { id, matric_number, full_name, parent_email });
+            if (!id || !matric_number || !full_name || !parent_email) {
+                alert('All fields are required');
+                return;
+            }
+
+            fetch('/edit_student', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+                body: `id=${encodeURIComponent(id)}&matric_number=${encodeURIComponent(matric_number)}&full_name=${encodeURIComponent(full_name)}&parent_email=${encodeURIComponent(parent_email)}`
+            })
+            .then(response => response.json())
+            .then(data => {
+                alert(data.message || data.error);
+                if (data.message) {
+                    loadStudents();
+                    const modal = bootstrap.Modal.getInstance(editModal); // Use editModal
+                    modal.hide();
+                }
+            })
+            .catch(error => console.error('Error editing student:', error));
         });
     }
 
     // Send absence alerts
     if (sendAlertsBtn) {
         sendAlertsBtn.addEventListener('click', () => {
-            if (sendAlertsBtn.disabled) return; // Prevent action if disabled
             fetch('/send_absence_alerts', { method: 'POST' })
                 .then(response => response.json())
                 .then(data => {
                     alert(data.message);
                     loadAttendance(); // Refresh attendance table
-                    sendAlertsBtn.disabled = true; // Disable after sending
                 })
                 .catch(error => console.error('Error:', error));
         });
@@ -134,4 +222,6 @@ document.addEventListener('DOMContentLoaded', () => {
     // Initial load based on page
     if (addStudentForm) loadStudents();
     if (attendanceTable) loadAttendance();
+    if (document.querySelectorAll('.edit-btn, .delete-btn').length > 0) attachEditDeleteListeners();
+    if (document.querySelectorAll('.delete-attendance').length > 0) attachDeleteAttendanceListeners();
 });
